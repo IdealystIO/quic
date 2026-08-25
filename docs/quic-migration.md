@@ -82,6 +82,8 @@ clock running past the end of the sender — the fixture, not the code.
 | a mixed-encoding stream decodes correctly | `voice-proto/src/codec.rs` — the raw frame inside an Opus stream comes back lossless |
 | loss goes to the codec, not to a repeater | same file — an Opus stream conceals with signal, not silence |
 | how much delay a bursty sender costs | `jitter/src/lib.rs` — 20.0 ms evenly paced against 46.5 ms in bursts of four |
+| the buffer is at its floor on a paced sender | `tools/voice-flows.js` — 20 ms held, down from 97 before the capture block shrank |
+| each side receives about what the other sent | same test — a counter wrong by a factor of two passes "> 0" and this is what caught it |
 
 ## How playout is clocked, with no clock to use
 
@@ -151,16 +153,15 @@ the receiving half that a fix would make usable. The choice is one file.
   a test. Worth reporting upstream; reproduces in about twenty lines. This costs
   real quality on a lossy link — FEC *recovers* an isolated loss where PLC only
   conceals it.
-- **The capture block is paid for twice, and the second charge is the bigger
-  surprise.** Capture arrives 85 ms at a time and is cut into four 20 ms packets
-  that go out together. A receiver cannot tell a burst it was sent from a burst
-  the network made, so it sizes its buffer for it: measured in `jitter`'s own
-  tests, an evenly paced sender settles at 20.0 ms of delay and bursts of four
-  settle at 46.5 ms, and in the browser the buffer peaked near 100 ms. That is
-  on top of the ~171 ms floor. There is no fix on this side — pacing the packets
-  out needs a timer the runtime does not have — so it is recorded as framework
-  finding 10c, where it makes a configurable block size the highest-leverage
-  number in the audio stack rather than a nice-to-have.
+- **The capture block was paid for twice.** Capture arrived 85 ms at a time and
+  went out as four 20 ms packets at once, and a receiver cannot tell a burst it
+  was sent from a burst the network made — so it buffered for it. Measured in
+  `jitter`'s own tests: an evenly paced sender settles at 20.0 ms of delay,
+  bursts of four settle at 46.5 ms, and in the browser it peaked near 100 ms.
+  **Fixed upstream**: `AudioStreamConfig::with_block_frames` and
+  `media_stream::Playout` now exist, this client asks for 1024 and 512, and the
+  buffer settles at 20 ms — the floor. Total buffering went from ~268 ms to
+  ~63 ms. See framework finding 10c.
 - **No clock-drift correction.** `jitter` does not resample, so it cannot
   correct a few hundred ppm between two machines. Over a long call that drains
   the buffer or grows it. `Stats::drift_events` counts the symptom so the
