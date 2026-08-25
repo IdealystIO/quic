@@ -1,7 +1,8 @@
 # Moving voice off TCP
 
-Status: **the pieces exist and are proven together; nothing is wired into the
-app yet.** The WebSocket path is untouched and still carries every call.
+Status: **the pieces exist and are proven together; the web build can now
+reach WebTransport; nothing is wired into the app yet.** The WebSocket path is
+untouched and still carries every call.
 
 ## Why
 
@@ -56,9 +57,14 @@ clock running past the end of the sender — the fixture, not the code.
    universally reachable.
 3. **20 ms packetisation.** `Off` mode still emits one packet per 85 ms capture
    block. That is 8160 bytes and *cannot* be a datagram at any tuning.
-4. **`--cfg=web_sys_unstable_apis` has to reach `idealyst build --web`.**
-   web-sys still gates the WebTransport bindings behind it. Unverified — this is
-   the next thing to check, because it gates everything above.
+4. ~~**`--cfg=web_sys_unstable_apis` has to reach `idealyst build --web`.**~~
+   **Done.** It does, from `.cargo/config.toml`, and the app carries it there.
+   Getting it there cost two fixes in idealyst — see
+   [findings 15 and 16](hearth-framework-findings.md#15-idealyst-build---web-silently-discards-cargoconfigtoml-rustflags):
+   the web builder was dropping config rustflags without saying so, and the flag
+   *switches* eleven unrelated web-sys signatures rather than adding bindings.
+   Requires idealyst CLI **1.3.16** or later; on 1.3.15 the flag has to be an
+   environment variable or it is silently discarded.
 5. **Certificate rotation.** Browsers cap a pinned self-signed certificate at
    ~two weeks, so a self-hosted instance needs rotation and a way to hand
    clients the new hash. The ticket response is the obvious carrier.
