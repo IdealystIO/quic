@@ -1,8 +1,8 @@
 # Moving voice off TCP
 
-Status: **the pieces exist and are proven together; the web build can now
-reach WebTransport; nothing is wired into the app yet.** The WebSocket path is
-untouched and still carries every call.
+Status: **a relay serves calls over WebTransport, and a browser reaches it.
+Audio still travels on the WebSocket.** The last step is the client carrying
+its packets over the session it already opens.
 
 ## Why
 
@@ -49,25 +49,42 @@ clock running past the end of the sender — the fixture, not the code.
 
 ## What is left
 
-1. **`voice-server`: a WebTransport listener beside the WebSocket one.**
-   `datagram::Listener` is the piece; the relay's room fan-out is transport
-   agnostic already.
-2. **`voice-client`: choose a transport.** Two implementations behind one seam,
-   with WebSocket as the fallback that is kept rather than removed — UDP is not
-   universally reachable.
-3. **20 ms packetisation.** `Off` mode still emits one packet per 85 ms capture
-   block. That is 8160 bytes and *cannot* be a datagram at any tuning.
-4. ~~**`--cfg=web_sys_unstable_apis` has to reach `idealyst build --web`.**~~
-   **Done.** It does, from `.cargo/config.toml`, and the app carries it there.
-   Getting it there cost two fixes in idealyst — see
-   [findings 15 and 16](hearth-framework-findings.md#15-idealyst-build---web-silently-discards-cargoconfigtoml-rustflags):
-   the web builder was dropping config rustflags without saying so, and the flag
-   *switches* eleven unrelated web-sys signatures rather than adding bindings.
-   Requires idealyst CLI **1.3.16** or later; on 1.3.15 the flag has to be an
-   environment variable or it is silently discarded.
-5. **Certificate rotation.** Browsers cap a pinned self-signed certificate at
-   ~two weeks, so a self-hosted instance needs rotation and a way to hand
-   clients the new hash. The ticket response is the obvious carrier.
+1. **The client has to carry audio over the session it already opens.** It
+   dials WebTransport at join, proves it works, closes it, and then makes the
+   call on the WebSocket. Everything either side of that is done: the packets
+   fit a datagram, the relay serves both transports through one `serve`, and
+   the browser can open an authenticated session. What remains is the publish
+   half — `SharedSender` is a `WsSender`, and the capture callback is
+   synchronous while `Link::send` is not.
+
+2. **A jitter buffer on the receive path.** Not needed today and that is the
+   point: a reliable ordered transport has nothing to reorder. The moment audio
+   moves to datagrams it does, and `jitter` is the piece — holding encoded
+   packets, so loss goes to the decoder that has the signal model.
+
+3. **Certificate rotation.** A node mints a certificate at startup, valid
+   thirteen days, and browsers will not pin one for longer. A node up for a
+   fortnight stops admitting new callers. The ticket response is the obvious
+   carrier for a fresh hash.
+
+4. **WebTransport cannot be reverse-proxied.** The gateway exists so nodes need
+   not be publicly addressable; a QUIC session terminates at whoever holds the
+   certificate, so it cannot. `/_voice/node/{id}/webtransport` passes the node's
+   own address through unchanged, and a deployment unwilling to expose nodes
+   keeps its calls on the WebSocket. This is a deployment decision, not a bug,
+   but it is not the shape the gateway was designed around.
+
+5. **Safari.** Still unverified.
+
+## What is proven, and how
+
+| claim | where |
+| --- | --- |
+| a call relays over QUIC, decoded back to what was said | `voice-server/tests/quic_relay.rs` — correlation 0.83 |
+| a talker does not hear themselves over the new carrier | same test |
+| raw PCM could never have fitted | same test: the measured datagram limit is 1413 bytes against 1952 |
+| a **browser** opens an authenticated session against a pinned self-signed certificate | `tools/voice-flows.js` |
+| Opus is actually on the wire, not silently fallen back | `tools/voice-flows.js` — 94 bytes a packet, 38 kbps |
 
 ## Decisions worth not re-litigating
 
@@ -114,6 +131,16 @@ the receiving half that a fix would make usable. The choice is one file.
   bytes a frame.
 - **Safari.** Unverified, and historically the blocker for WebTransport. Check
   before promising it.
+- **A refused ticket and a blocked UDP port look identical from a browser.**
+  Both are `WebTransportError: Opening handshake failed`, with nothing to tell
+  them apart — which is why the client's reachability probe carries the room's
+  ticket, and why the node answers a `probe=1` session on the control stream
+  instead of just closing it. An unauthenticated probe reports every
+  ticket-checking node as unreachable.
+- **A pinned certificate valid for too long fails the same way.** `rcgen`
+  defaults to the year 4096; browsers refuse anything over about fourteen days,
+  and say so as "Opening handshake failed" — naming neither certificates nor
+  validity. `datagram::host::VALID_DAYS` is thirteen, with a test.
 
 ## A trap that cost an hour
 

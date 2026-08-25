@@ -1,6 +1,14 @@
 //! The half a browser cannot do: accepting sessions, and having a certificate.
 
 use rustls_pki_types::{CertificateDer, PrivateKeyDer};
+
+/// How long a generated certificate is valid.
+///
+/// Thirteen days, because browsers cap a *pinned* certificate at fourteen and
+/// the margin covers a machine whose clock is a little fast. This is the number
+/// that makes rotation a deployment requirement rather than a nicety — see
+/// [`Identity`].
+const VALID_DAYS: u64 = 13;
 use sha2::{Digest, Sha256};
 
 use crate::{Link, LinkError};
@@ -31,11 +39,34 @@ impl Identity {
     /// will dial).
     pub fn self_signed(names: &[&str]) -> Result<Identity, LinkError> {
         let names: Vec<String> = names.iter().map(|s| s.to_string()).collect();
-        let cert = rcgen::generate_simple_self_signed(names)
+        let mut params = rcgen::CertificateParams::new(names)
             .map_err(|e| LinkError::Transport(format!("certificate: {e}")))?;
-        let der = CertificateDer::from(cert.cert);
+
+        // The validity window is NOT a detail. A browser accepts a pinned
+        // certificate only if it expires within about two weeks — the trade it
+        // demands for skipping a CA — and `rcgen`'s default runs to the year
+        // 4096. With that default Chromium answers "Opening handshake failed",
+        // which names neither certificates nor validity and reads exactly like
+        // a blocked port.
+        //
+        // A day of backdating absorbs clock skew between the two machines,
+        // which is otherwise a certificate that is not yet valid.
+        let now = std::time::SystemTime::now();
+        params.not_before = (now - std::time::Duration::from_secs(24 * 60 * 60)).into();
+        params.not_after = (now + std::time::Duration::from_secs(VALID_DAYS * 24 * 60 * 60)).into();
+
+        // ECDSA P-256, which is what browsers require of a pinned certificate.
+        // `rcgen`'s default already, named explicitly because the failure if it
+        // ever changed is the same unreadable handshake error as above.
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256)
+            .map_err(|e| LinkError::Transport(format!("key: {e}")))?;
+        let cert = params
+            .self_signed(&key_pair)
+            .map_err(|e| LinkError::Transport(format!("certificate: {e}")))?;
+
+        let der = CertificateDer::from(cert);
         let hash = Sha256::digest(der.as_ref()).to_vec();
-        let key = PrivateKeyDer::try_from(cert.key_pair.serialize_der())
+        let key = PrivateKeyDer::try_from(key_pair.serialize_der())
             .map_err(|e| LinkError::Transport(format!("key: {e}")))?;
         Ok(Identity { chain: vec![der], key, hash })
     }
@@ -45,6 +76,34 @@ impl Identity {
     /// which node to dial.
     pub fn hash_hex(&self) -> String {
         self.hash.iter().map(|b| format!("{b:02x}")).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parse_hash;
+
+    #[test]
+    fn a_generated_certificate_expires_inside_the_window_browsers_allow() {
+        // The number browsers enforce is fourteen days, and exceeding it fails
+        // as "Opening handshake failed" — words that name neither certificates
+        // nor validity. This is the assertion that keeps that from coming back.
+        assert!(VALID_DAYS < 14, "a pinned certificate must expire within a fortnight");
+        assert!(VALID_DAYS > 1, "and be worth generating");
+    }
+
+    #[test]
+    fn an_identity_publishes_the_hash_of_the_certificate_it_actually_has() {
+        let id = Identity::self_signed(&["127.0.0.1"]).expect("generates");
+        let hex = id.hash_hex();
+        assert_eq!(hex.len(), 64, "sha-256 as hex");
+        assert_eq!(parse_hash(&hex).as_deref(), Some(id.hash.as_slice()));
+        assert_eq!(
+            id.hash,
+            Sha256::digest(id.chain[0].as_ref()).to_vec(),
+            "the published hash is of the certificate that is served",
+        );
     }
 }
 

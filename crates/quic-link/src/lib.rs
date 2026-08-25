@@ -47,6 +47,44 @@
 use bytes::Bytes;
 use futures::FutureExt;
 
+/// Hex back to bytes — the inverse of [`Identity::hash_hex`], for a client that
+/// was handed one and has to pin it.
+///
+/// `None` for anything that is not an even run of hex digits. A hash that does
+/// not parse is a node saying something we do not understand, and pinning a
+/// truncated one fails at the handshake with a message about certificates
+/// rather than about the node that sent nonsense.
+pub fn parse_hash(hex: &str) -> Option<Vec<u8>> {
+    if hex.is_empty() || hex.len() % 2 != 0 {
+        return None;
+    }
+    (0..hex.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+        .collect()
+}
+
+#[cfg(test)]
+mod hash_tests {
+    use super::parse_hash;
+
+    #[test]
+    fn a_hash_round_trips() {
+        assert_eq!(parse_hash("00ff10"), Some(vec![0x00, 0xff, 0x10]));
+    }
+
+    #[test]
+    fn a_hash_that_is_not_a_hash_is_refused_rather_than_truncated() {
+        // Pinning half a hash fails at the TLS handshake, where the message
+        // names certificates rather than the node that sent nonsense — so the
+        // refusal has to happen here, where the caller can say what it saw.
+        assert_eq!(parse_hash("abc"), None, "odd length");
+        assert_eq!(parse_hash(""), None, "empty");
+        assert_eq!(parse_hash("zz"), None, "not hex");
+        assert_eq!(parse_hash("00 ff"), None, "spaces are not hex either");
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
 #[cfg(not(target_arch = "wasm32"))]
