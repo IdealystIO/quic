@@ -1,8 +1,10 @@
 # Moving voice off TCP
 
-Status: **a relay serves calls over WebTransport, and a browser reaches it.
-Audio still travels on the WebSocket.** The last step is the client carrying
-its packets over the session it already opens.
+Status: **calls run on QUIC datagrams, browser to relay, in both directions.**
+The WebSocket is the fallback for networks where UDP does not get through, and
+it is chosen by dialling rather than by guessing. What is missing is the piece
+an unreliable transport makes mandatory and a reliable one hid: a jitter buffer
+on the receive path.
 
 ## Why
 
@@ -49,32 +51,26 @@ clock running past the end of the sender — the fixture, not the code.
 
 ## What is left
 
-1. **The client has to carry audio over the session it already opens.** It
-   dials WebTransport at join, proves it works, closes it, and then makes the
-   call on the WebSocket. Everything either side of that is done: the packets
-   fit a datagram, the relay serves both transports through one `serve`, and
-   the browser can open an authenticated session. What remains is the publish
-   half — `SharedSender` is a `WsSender`, and the capture callback is
-   synchronous while `Link::send` is not.
+1. **A jitter buffer on the receive path.** This is now the gap rather than a
+   future one. The receive loop still decodes each packet as it arrives and
+   writes it straight to the sink, which was correct on a transport that could
+   not reorder or lose anything, and is not correct on this one. `jitter` is
+   the piece — holding encoded packets, so loss goes to the decoder that has
+   the signal model.
 
-2. **A jitter buffer on the receive path.** Not needed today and that is the
-   point: a reliable ordered transport has nothing to reorder. The moment audio
-   moves to datagrams it does, and `jitter` is the piece — holding encoded
-   packets, so loss goes to the decoder that has the signal model.
-
-3. **Certificate rotation.** A node mints a certificate at startup, valid
+2. **Certificate rotation.** A node mints a certificate at startup, valid
    thirteen days, and browsers will not pin one for longer. A node up for a
    fortnight stops admitting new callers. The ticket response is the obvious
    carrier for a fresh hash.
 
-4. **WebTransport cannot be reverse-proxied.** The gateway exists so nodes need
+3. **WebTransport cannot be reverse-proxied.** The gateway exists so nodes need
    not be publicly addressable; a QUIC session terminates at whoever holds the
    certificate, so it cannot. `/_voice/node/{id}/webtransport` passes the node's
    own address through unchanged, and a deployment unwilling to expose nodes
    keeps its calls on the WebSocket. This is a deployment decision, not a bug,
    but it is not the shape the gateway was designed around.
 
-5. **Safari.** Still unverified.
+4. **Safari.** Still unverified.
 
 ## What is proven, and how
 
@@ -83,7 +79,9 @@ clock running past the end of the sender — the fixture, not the code.
 | a call relays over QUIC, decoded back to what was said | `voice-server/tests/quic_relay.rs` — correlation 0.83 |
 | a talker does not hear themselves over the new carrier | same test |
 | raw PCM could never have fitted | same test: the measured datagram limit is 1413 bytes against 1952 |
-| a **browser** opens an authenticated session against a pinned self-signed certificate | `tools/voice-flows.js` |
+| two **browsers** hold a call over QUIC datagrams, each hearing the other | `tools/voice-flows.js` — 712 packets each way, both meters live |
+| against a pinned self-signed certificate, with a room ticket | same test, on a fleet that refuses unticketed joins |
+| the send queue does not quietly overflow | same test — `unsent` is asserted zero, and it is the only thing that would distinguish a stalled publish path from a quiet room |
 | Opus is actually on the wire, not silently fallen back | `tools/voice-flows.js` — 94 bytes a packet, 38 kbps |
 
 ## Decisions worth not re-litigating
@@ -133,10 +131,27 @@ the receiving half that a fix would make usable. The choice is one file.
   before promising it.
 - **A refused ticket and a blocked UDP port look identical from a browser.**
   Both are `WebTransportError: Opening handshake failed`, with nothing to tell
-  them apart — which is why the client's reachability probe carries the room's
-  ticket, and why the node answers a `probe=1` session on the control stream
-  instead of just closing it. An unauthenticated probe reports every
-  ticket-checking node as unreachable.
+  them apart — which is why the dial carries the room's ticket like the
+  WebSocket does, from the same `carrier::Join::query`. An unauthenticated dial
+  would report every ticket-checking node as unreachable.
+- **Falling back costs about ten seconds on a network that blocks UDP.** A QUIC
+  handshake nothing answers does not fail fast; the browser retries until its
+  own timeout. Racing the dial against a sleep would fix it, and there is no
+  timer in `runtime_core` to race it with — so this is a framework gap wearing a
+  voice costume. The call does connect, just not promptly.
+- **A client that cannot encode cannot use datagrams.** `Encoded::open` falls
+  back to raw PCM at a sample rate Opus will not take (44.1 kHz is real
+  hardware), and 20 ms of raw PCM does not fit a datagram at any tuning. The
+  encoding is chosen from the first capture block, which arrives *after* the
+  transport is chosen, so today that call is silent outward with `unsent`
+  climbing and one console line saying why. The honest fix is to reopen on the
+  WebSocket when the codec falls back.
+- **A redirect re-runs the whole transport choice.** Each node publishes its own
+  UDP port and its own certificate, so there is nothing about the old session to
+  reuse — `connect` asks the new node from scratch, and a node that offers no
+  WebTransport moves that call to the WebSocket mid-hop. Correct, but it means a
+  handover can change the carrier, which the counters show and nothing else
+  does.
 - **A pinned certificate valid for too long fails the same way.** `rcgen`
   defaults to the year 4096; browsers refuse anything over about fourteen days,
   and say so as "Opening handshake failed" — naming neither certificates nor
