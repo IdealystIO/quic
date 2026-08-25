@@ -98,7 +98,7 @@ impl Request {
 
     /// Where the client is dialling from, for logs.
     pub fn remote_addr(&self) -> std::net::SocketAddr {
-        self.inner.remote_address()
+        self.inner.conn().remote_address()
     }
 
     /// Allow it, and get the link.

@@ -50,7 +50,7 @@ use futures::FutureExt;
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
 #[cfg(not(target_arch = "wasm32"))]
-pub use host::{Identity, Listener};
+pub use host::{Identity, Listener, Request};
 
 /// The datagram size assumed where the real one cannot be read — see
 /// [`Link::max_datagram`].
