@@ -1,0 +1,27 @@
+[package]
+name = "datagram"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A real-time link over QUIC: unreliable datagrams for media, reliable streams for control."
+
+[dependencies]
+# One API, two backends, chosen by `#[path]` at compile time: quinn on native,
+# the browser's own WebTransport on wasm. This crate exists to hold the shape
+# the app wants on top of it — not to reimplement what this already does.
+web-transport = "0.12"
+bytes = "1"
+futures = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+
+# The server half is native-only, and not by our choice: a browser can dial a
+# WebTransport session but cannot host one.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+web-transport-quinn = "0.12"
+rcgen = "0.13"
+rustls-pki-types = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+audio-codec = { workspace = true }
+jitter = { workspace = true }
