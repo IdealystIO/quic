@@ -17,6 +17,8 @@ futures = { version = "0.3", default-features = false, features = ["std", "async
 # WebTransport session but cannot host one.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 web-transport-quinn = "0.12"
+# Status codes for refusing a connect request before it becomes a session.
+http = "1"
 rcgen = "0.13"
 rustls-pki-types = "1"
 sha2 = "0.10"

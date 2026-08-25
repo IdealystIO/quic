@@ -70,15 +70,52 @@ impl Listener {
         self.inner.local_addr().map_err(|e| LinkError::Transport(e.to_string()))
     }
 
-    /// Wait for the next session. `None` once the endpoint is closed.
-    pub async fn accept(&mut self) -> Option<Link> {
-        let request = self.inner.accept().await?;
-        // The request carries the URL path, which is where room and identity
-        // will live — the same place the WebSocket carried them as a query
-        // string. Nothing reads it yet.
-        match request.ok().await {
-            Ok(session) => Some(Link::from_session(session.into())),
-            Err(_) => None,
+    /// Wait for the next connect request. `None` once the endpoint is closed.
+    ///
+    /// A request is not yet a session: it carries the URL the client dialled,
+    /// and it can be [refused](Request::refuse) with a status the client can
+    /// read. That ordering matters — it is the WebTransport equivalent of
+    /// checking a ticket before the upgrade, rather than opening a connection
+    /// and killing it for no stated reason.
+    pub async fn accept(&mut self) -> Option<Request> {
+        Some(Request { inner: self.inner.accept().await? })
+    }
+}
+
+/// A client asking to open a session, before it has been allowed to.
+pub struct Request {
+    inner: web_transport_quinn::Request,
+}
+
+impl Request {
+    /// The URL the client dialled, path and query included.
+    ///
+    /// This is where room, participant id and ticket live — the same place the
+    /// WebSocket carried them.
+    pub fn url(&self) -> String {
+        self.inner.connect().url.to_string()
+    }
+
+    /// Where the client is dialling from, for logs.
+    pub fn remote_addr(&self) -> std::net::SocketAddr {
+        self.inner.remote_address()
+    }
+
+    /// Allow it, and get the link.
+    pub async fn accept(self) -> Result<Link, LinkError> {
+        match self.inner.ok().await {
+            Ok(session) => Ok(Link::from_session(session.into())),
+            Err(e) => Err(LinkError::Transport(format!("accept: {e}"))),
         }
+    }
+
+    /// Refuse it with an HTTP status, which the browser surfaces to the page.
+    ///
+    /// An unknown status code is sent as 403: refusing is already the
+    /// answer, and failing to refuse because the code was wrong would leave
+    /// the request hanging.
+    pub async fn refuse(self, status: u16) {
+        let status = http::StatusCode::from_u16(status).unwrap_or(http::StatusCode::FORBIDDEN);
+        let _ = self.inner.reject(status).await;
     }
 }

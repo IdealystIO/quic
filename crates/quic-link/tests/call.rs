@@ -54,7 +54,7 @@ async fn fleet() -> (Listener, String, Vec<u8>) {
 async fn a_datagram_crosses_a_real_quic_connection() {
     let (mut listener, url, hash) = fleet().await;
     let server = tokio::spawn(async move {
-        let link = listener.accept().await.expect("session");
+        let link = listener.accept().await.expect("request").accept().await.expect("session");
         match link.recv().await {
             Event::Data(bytes) => bytes,
             other => panic!("expected a datagram, got {other:?}"),
@@ -81,7 +81,7 @@ async fn a_datagram_crosses_a_real_quic_connection() {
 async fn control_is_reliable_alongside_datagrams() {
     let (mut listener, url, hash) = fleet().await;
     let server = tokio::spawn(async move {
-        let link = listener.accept().await.expect("session");
+        let link = listener.accept().await.expect("request").accept().await.expect("session");
         let mut control = Vec::new();
         while control.len() < 3 {
             if let Event::Control(text) = link.recv().await {
@@ -109,7 +109,7 @@ async fn control_is_reliable_alongside_datagrams() {
 async fn an_oversized_payload_is_refused_with_the_limit() {
     let (mut listener, url, hash) = fleet().await;
     tokio::spawn(async move {
-        let link = listener.accept().await.expect("session");
+        let link = listener.accept().await.expect("request").accept().await.expect("session");
         // Hold the session open for the duration of the test.
         loop {
             if link.recv().await == Event::Closed {
@@ -149,7 +149,7 @@ async fn a_call_survives_loss_over_quic() {
     let stats = Arc::new(std::sync::Mutex::new(jitter::Stats::default()));
     let (sink, tally) = (received.clone(), stats.clone());
     let server = tokio::spawn(async move {
-        let link = listener.accept().await.expect("session");
+        let link = listener.accept().await.expect("request").accept().await.expect("session");
         let decoder = audio_codec::Decoder::new(settings.frame, RATE, 1).expect("decoder");
         let mut buffer = jitter::Buffer::new(jitter::Tuning::default(), decoder, RATE, 1);
         let frame = settings.frame.frames(RATE);
