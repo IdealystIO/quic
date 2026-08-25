@@ -85,6 +85,140 @@ mod hash_tests {
     }
 }
 
+/// Whether a page at `page_host` could plausibly open a session to `endpoint`.
+///
+/// `None` means go ahead. `Some(reason)` means do not bother, and the reason is
+/// worth saying out loud.
+///
+/// This exists because a QUIC session **cannot be reverse-proxied** — it
+/// terminates at whoever holds the certificate — so a node behind a gateway
+/// publishes its own address, unchanged, and that address is frequently one the
+/// client cannot reach. The common case is a tunnel: the page is served from
+/// `https://something.ngrok.app` and the node publishes `https://127.0.0.1:8798`,
+/// which is either unroutable or blocked outright by the browser's
+/// private-network rules.
+///
+/// Checking is worth more than it looks. Without it the client dials anyway and
+/// waits out a QUIC handshake timeout — on the order of ten seconds, on the join
+/// path, with somebody watching — before falling back to a transport that was
+/// always going to be the answer.
+pub fn unreachable_from(page_host: &str, endpoint: &str) -> Option<String> {
+    let host = url_host(endpoint)?;
+    if !is_loopback(&host) {
+        // A routable address, or a private one on a network the page may well
+        // share. Only a dial can settle those.
+        return None;
+    }
+    // Through the same parser as the endpoint: an IPv6 page host is bracketed
+    // and full of colons, so splitting on the first one yields "[".
+    let page = authority_host(page_host).unwrap_or_else(|| page_host.to_string());
+    if is_loopback(&page) || page.eq_ignore_ascii_case(&host) {
+        // The page is on the same machine, so loopback is exactly right.
+        return None;
+    }
+    Some(format!(
+        "node published {endpoint}, which is loopback and unreachable from {page}; a QUIC \
+         session cannot be proxied, so a tunnelled deployment stays on the WebSocket",
+    ))
+}
+
+/// The host of a URL, without scheme, port, path or credentials.
+fn url_host(url: &str) -> Option<String> {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let authority = rest.split(['/', '?', '#']).next()?;
+    authority_host(authority)
+}
+
+/// The host out of a `host`, `host:port`, `[v6]:port` or `user@host` authority.
+///
+/// Shared by both sides of [`unreachable_from`] on purpose. They were two
+/// different parsers for one afternoon, and the page-host one split
+/// `[::1]:8091` on the first colon and decided the host was `[`.
+fn authority_host(authority: &str) -> Option<String> {
+    let authority = authority.rsplit('@').next()?;
+    // IPv6 literals are bracketed, and contain the colons a port split would
+    // otherwise chop in half.
+    if let Some(rest) = authority.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return Some(rest[..end].to_string());
+        }
+    }
+    let host = authority.split(':').next()?;
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+fn is_loopback(host: &str) -> bool {
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    host.eq_ignore_ascii_case("localhost")
+        || host == "::1"
+        || host.starts_with("127.")
+}
+
+#[cfg(test)]
+mod reach_tests {
+    use super::unreachable_from;
+
+    #[test]
+    fn a_tunnelled_page_is_told_not_to_bother_with_a_loopback_node() {
+        // The case that sent this whole check into existence: sharing the app
+        // over ngrok, where the WebSocket proxies fine and the QUIC endpoint is
+        // the node's own 127.0.0.1.
+        let why = unreachable_from("abc123.ngrok.app", "https://127.0.0.1:8798/ws")
+            .expect("a public page cannot reach loopback");
+        assert!(why.contains("127.0.0.1"), "and names the address: {why}");
+        assert!(why.contains("ngrok.app"), "and who could not reach it: {why}");
+    }
+
+    #[test]
+    fn a_page_on_the_same_machine_dials_it() {
+        // The loopback demo, and every test in this repo. Skipping here would
+        // turn the feature off for the only setup that exercises it.
+        assert_eq!(unreachable_from("localhost:8091", "https://127.0.0.1:8798/ws"), None);
+        assert_eq!(unreachable_from("127.0.0.1:8091", "https://127.0.0.1:8798/ws"), None);
+        assert_eq!(unreachable_from("[::1]:8091", "https://[::1]:8798/ws"), None);
+    }
+
+    #[test]
+    fn a_routable_node_is_always_worth_dialling() {
+        // Including a LAN address from another LAN address: this check is about
+        // what is IMPOSSIBLE, not about what is likely. Only a dial settles the
+        // rest, and guessing would disable the feature on real deployments.
+        assert_eq!(unreachable_from("chat.example.com", "https://voice.example.com:8798/ws"), None);
+        assert_eq!(unreachable_from("192.168.1.10", "https://192.168.1.5:8798/ws"), None);
+    }
+
+    #[test]
+    fn a_url_it_cannot_read_is_left_to_the_dial() {
+        // Refusing on a parse failure would make an unfamiliar URL shape look
+        // like an unreachable node, which is a much harder thing to diagnose
+        // than a dial that simply fails.
+        assert_eq!(unreachable_from("example.com", "not a url at all"), None);
+    }
+
+    #[test]
+    fn a_host_is_read_out_of_the_awkward_shapes_too() {
+        use super::url_host;
+        assert_eq!(url_host("https://127.0.0.1:8798/ws"), Some("127.0.0.1".into()));
+        assert_eq!(url_host("https://[::1]:8798/ws"), Some("::1".into()));
+        assert_eq!(url_host("https://user@host.example:443/x?y=1"), Some("host.example".into()));
+    }
+
+    #[test]
+    fn a_bracketed_page_host_is_parsed_by_the_same_rule_as_the_endpoint() {
+        // Two parsers for one job is how `[::1]:8091` came out as the host "[",
+        // which then failed to match anything and would have disabled the
+        // transport for a setup that works perfectly.
+        use super::authority_host;
+        assert_eq!(authority_host("[::1]:8091"), Some("::1".into()));
+        assert_eq!(authority_host("localhost:8091"), Some("localhost".into()));
+        assert_eq!(authority_host("example.com"), Some("example.com".into()));
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 mod host;
 #[cfg(not(target_arch = "wasm32"))]

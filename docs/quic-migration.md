@@ -1,12 +1,26 @@
 # Moving voice off TCP
 
-Status: **calls run on QUIC datagrams, browser to relay, in both directions,
-through a jitter buffer.** The WebSocket is the fallback for networks where UDP
-does not get through, and it is chosen by dialling rather than by guessing.
+Status: **calls run on QUIC datagrams when the browser can reach the node
+directly.** Both directions, through a jitter buffer, with the WebSocket as the
+fallback.
 
-The migration is done. What is left is deployment work — certificate rotation,
-what a gateway can and cannot proxy — and one measurement that came out worse
-than expected, recorded below.
+**Read that first clause carefully — it excludes the tunnel.** A QUIC session
+cannot be reverse-proxied, so a node behind a gateway publishes its own address.
+Serve the app through ngrok and the browser is told to dial `127.0.0.1:8798`,
+which it cannot route to, so every tunnelled call is on the WebSocket. That is
+not a bug, it is the shape of the protocol, but an earlier version of this line
+said "browser to relay" without the qualifier and was measured only against a
+browser pointed straight at localhost.
+
+| how you are running it | carrier |
+| --- | --- |
+| browser direct to the node's origin (`tools/voice-fleet.sh`, the test suite) | **WebTransport** |
+| browser through a tunnel or any gateway (`tools/share.sh` + ngrok) | WebSocket |
+| the docker fleet | WebSocket — it sets no `VOICE_WEBTRANSPORT` at all |
+
+What is left is deployment work — certificate rotation, giving a node a
+reachable UDP endpoint — and one measurement that came out worse than expected,
+recorded below.
 
 ## Why
 
@@ -82,6 +96,7 @@ clock running past the end of the sender — the fixture, not the code.
 | a mixed-encoding stream decodes correctly | `voice-proto/src/codec.rs` — the raw frame inside an Opus stream comes back lossless |
 | loss goes to the codec, not to a repeater | same file — an Opus stream conceals with signal, not silence |
 | how much delay a bursty sender costs | `jitter/src/lib.rs` — 20.0 ms evenly paced against 46.5 ms in bursts of four |
+| the reachability rule, on the shapes that break it | `datagram/src/lib.rs` — including the IPv6 page host that two parsers disagreed about |
 | the buffer is at its floor on a paced sender | `tools/voice-flows.js` — 20 ms held, down from 97 before the capture block shrank |
 | each side receives about what the other sent | same test — a counter wrong by a factor of two passes "> 0" and this is what caught it |
 
@@ -178,11 +193,14 @@ the receiving half that a fix would make usable. The choice is one file.
   them apart — which is why the dial carries the room's ticket like the
   WebSocket does, from the same `carrier::Join::query`. An unauthenticated dial
   would report every ticket-checking node as unreachable.
-- **Falling back costs about ten seconds on a network that blocks UDP.** A QUIC
-  handshake nothing answers does not fail fast; the browser retries until its
-  own timeout. Racing the dial against a sleep would fix it, and there is no
-  timer in `runtime_core` to race it with — so this is a framework gap wearing a
-  voice costume. The call does connect, just not promptly.
+- **A doomed dial no longer stalls the join.** It used to cost about ten
+  seconds: a QUIC handshake nothing answers does not fail fast, and the browser
+  retries until its own timeout. Now the client gives up twice — *before*
+  dialling when the published address is one this page could not reach even in
+  principle (`datagram::unreachable_from`, which is the tunnelled case), and
+  after three seconds otherwise. Dropping the dial does not cancel the handshake
+  underneath, so an orphaned session may still open and be discarded; that is
+  worth seven seconds off every join that was never going to work.
 - **A client that cannot encode cannot use datagrams.** `Encoded::open` falls
   back to raw PCM at a sample rate Opus will not take (44.1 kHz is real
   hardware), and 20 ms of raw PCM does not fit a datagram at any tuning. The
