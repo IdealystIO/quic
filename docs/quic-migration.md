@@ -1,10 +1,12 @@
 # Moving voice off TCP
 
-Status: **calls run on QUIC datagrams, browser to relay, in both directions.**
-The WebSocket is the fallback for networks where UDP does not get through, and
-it is chosen by dialling rather than by guessing. What is missing is the piece
-an unreliable transport makes mandatory and a reliable one hid: a jitter buffer
-on the receive path.
+Status: **calls run on QUIC datagrams, browser to relay, in both directions,
+through a jitter buffer.** The WebSocket is the fallback for networks where UDP
+does not get through, and it is chosen by dialling rather than by guessing.
+
+The migration is done. What is left is deployment work — certificate rotation,
+what a gateway can and cannot proxy — and one measurement that came out worse
+than expected, recorded below.
 
 ## Why
 
@@ -28,7 +30,7 @@ first (see [noise-suppression.md](noise-suppression.md#chain-latency)):
 
 | crate | what it is | tests |
 | --- | --- | --- |
-| `jitter` | adaptive jitter buffer + PLC, dependency-free | 14 |
+| `jitter` | adaptive jitter buffer, PLC, and the playout clock, dependency-free | 21 |
 | `audio-codec` | Opus encode/decode, pure Rust | 8 |
 | `datagram` | QUIC link: datagrams for media, streams for control | 4 |
 
@@ -51,26 +53,19 @@ clock running past the end of the sender — the fixture, not the code.
 
 ## What is left
 
-1. **A jitter buffer on the receive path.** This is now the gap rather than a
-   future one. The receive loop still decodes each packet as it arrives and
-   writes it straight to the sink, which was correct on a transport that could
-   not reorder or lose anything, and is not correct on this one. `jitter` is
-   the piece — holding encoded packets, so loss goes to the decoder that has
-   the signal model.
-
-2. **Certificate rotation.** A node mints a certificate at startup, valid
+1. **Certificate rotation.** A node mints a certificate at startup, valid
    thirteen days, and browsers will not pin one for longer. A node up for a
    fortnight stops admitting new callers. The ticket response is the obvious
    carrier for a fresh hash.
 
-3. **WebTransport cannot be reverse-proxied.** The gateway exists so nodes need
+2. **WebTransport cannot be reverse-proxied.** The gateway exists so nodes need
    not be publicly addressable; a QUIC session terminates at whoever holds the
    certificate, so it cannot. `/_voice/node/{id}/webtransport` passes the node's
    own address through unchanged, and a deployment unwilling to expose nodes
    keeps its calls on the WebSocket. This is a deployment decision, not a bug,
    but it is not the shape the gateway was designed around.
 
-4. **Safari.** Still unverified.
+3. **Safari.** Still unverified.
 
 ## What is proven, and how
 
@@ -83,6 +78,35 @@ clock running past the end of the sender — the fixture, not the code.
 | against a pinned self-signed certificate, with a room ticket | same test, on a fleet that refuses unticketed joins |
 | the send queue does not quietly overflow | same test — `unsent` is asserted zero, and it is the only thing that would distinguish a stalled publish path from a quiet room |
 | Opus is actually on the wire, not silently fallen back | `tools/voice-flows.js` — 94 bytes a packet, 38 kbps |
+| the jitter buffer is in the receive path, not bypassed | `tools/voice-flows.js` — it is carrying delay, and inventing nothing on a link with no loss |
+| a mixed-encoding stream decodes correctly | `voice-proto/src/codec.rs` — the raw frame inside an Opus stream comes back lossless |
+| loss goes to the codec, not to a repeater | same file — an Opus stream conceals with signal, not silence |
+| how much delay a bursty sender costs | `jitter/src/lib.rs` — 20.0 ms evenly paced against 46.5 ms in bursts of four |
+
+## How playout is clocked, with no clock to use
+
+A jitter buffer is *pulled* on a playout clock. This platform has nothing to run
+one on: `runtime_core` has no sleep, and `requestAnimationFrame` and
+`setInterval` are both throttled to roughly once a second in a background tab —
+which is exactly when a call has to keep working.
+
+So **the arrival is the trigger and the clock is the pacer**. Each packet that
+comes in pulls however many frames real time has moved on by
+(`jitter::Clock`), and the sink's own ring buffer downstream absorbs the
+burstiness. That ring was standing in for a jitter buffer before this; it is now
+doing the job it is actually good at.
+
+Two consequences worth stating:
+
+- **When nothing arrives, nothing is produced.** A talker who stops mid-word
+  gets concealment on the packets that follow the gap, and silence — not a
+  concealed drone — for a stall with no end. For a talker who simply stopped,
+  silence is the right answer.
+- **The backlog is capped.** Real time keeps running while a tab is
+  backgrounded, so the first packet after a resume would otherwise ask for every
+  frame the clock says is owed. Ten frames is the ceiling, and hitting it
+  resynchronises the clock rather than carrying the debt — a clock that stayed
+  behind would return the cap on every call forever.
 
 ## Decisions worth not re-litigating
 
@@ -103,6 +127,15 @@ the signal model. Opus resynthesises a plausible continuation; a PCM concealer
 can only repeat what it heard. It also keeps `jitter` dependency-free — the
 buffer never learns what a packet contains.
 
+**Why a tag byte in front of the buffered payload.** Because a stream is not
+necessarily all one encoding: a single failed Opus frame goes out raw, by
+design, since a hole in the audio is worse than a large packet. The buffer
+stores payloads it does not understand, so the encoding has to travel with them
+— one byte, never on the wire, written and read in `codec::Playout` and nowhere
+else. It also means a buffered payload is never empty, which matters because an
+empty payload is how `jitter::Decode` spells "missing": a DTX frame saying
+"still here, nothing to say" must not be mistaken for a gap.
+
 **Why `rusty-opus` over the more active `opus-rs`.** Measured, not preferred:
 `opus-rs` exposes no decoder-side concealment at all (`decode(&[])` errors), no
 `decode_fec`, and no DTX. The in-band FEC bug reproduces *identically in both*,
@@ -118,6 +151,16 @@ the receiving half that a fix would make usable. The choice is one file.
   a test. Worth reporting upstream; reproduces in about twenty lines. This costs
   real quality on a lossy link — FEC *recovers* an isolated loss where PLC only
   conceals it.
+- **The capture block is paid for twice, and the second charge is the bigger
+  surprise.** Capture arrives 85 ms at a time and is cut into four 20 ms packets
+  that go out together. A receiver cannot tell a burst it was sent from a burst
+  the network made, so it sizes its buffer for it: measured in `jitter`'s own
+  tests, an evenly paced sender settles at 20.0 ms of delay and bursts of four
+  settle at 46.5 ms, and in the browser the buffer peaked near 100 ms. That is
+  on top of the ~171 ms floor. There is no fix on this side — pacing the packets
+  out needs a timer the runtime does not have — so it is recorded as framework
+  finding 10c, where it makes a configurable block size the highest-leverage
+  number in the audio stack rather than a nice-to-have.
 - **No clock-drift correction.** `jitter` does not resample, so it cannot
   correct a few hundred ppm between two machines. Over a long call that drains
   the buffer or grows it. `Stats::drift_events` counts the symptom so the
