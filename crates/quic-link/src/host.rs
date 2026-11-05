@@ -71,6 +71,27 @@ impl Identity {
         Ok(Identity { chain: vec![der], key, hash })
     }
 
+    /// Load a CA-issued certificate chain and its private key, both PEM — what
+    /// certbot writes as `fullchain.pem` and `privkey.pem`.
+    ///
+    /// A client dials this with system roots (no hash), so none of the pinning
+    /// conditions above apply: no fortnight cap, nothing to rotate on restart.
+    /// [`hash`](Identity::hash) is still the leaf's, for a client that pins
+    /// anyway.
+    pub fn from_pem(chain_pem: &[u8], key_pem: &[u8]) -> Result<Identity, LinkError> {
+        use rustls_pki_types::pem::PemObject;
+        let chain = CertificateDer::pem_slice_iter(chain_pem)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| LinkError::Transport(format!("certificate chain: {e}")))?;
+        let leaf = chain
+            .first()
+            .ok_or_else(|| LinkError::Transport("certificate chain: no certificates in it".into()))?;
+        let hash = Sha256::digest(leaf.as_ref()).to_vec();
+        let key = PrivateKeyDer::from_pem_slice(key_pem)
+            .map_err(|e| LinkError::Transport(format!("private key: {e}")))?;
+        Ok(Identity { chain, key, hash })
+    }
+
     /// The hash as hex, which is how it travels to a client — in a config
     /// file, a URL, or the same API response that already tells the client
     /// which node to dial.
@@ -104,6 +125,25 @@ mod tests {
             Sha256::digest(id.chain[0].as_ref()).to_vec(),
             "the published hash is of the certificate that is served",
         );
+    }
+
+    #[test]
+    fn a_pem_identity_round_trips_and_hashes_its_leaf() {
+        let key_pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert = rcgen::CertificateParams::new(vec!["example.test".to_string()])
+            .unwrap()
+            .self_signed(&key_pair)
+            .unwrap();
+        let id = Identity::from_pem(cert.pem().as_bytes(), key_pair.serialize_pem().as_bytes())
+            .expect("loads");
+        assert_eq!(id.chain.len(), 1);
+        assert_eq!(id.chain[0].as_ref(), cert.der().as_ref());
+        assert_eq!(id.hash, Sha256::digest(cert.der().as_ref()).to_vec());
+    }
+
+    #[test]
+    fn a_pem_with_no_certificate_is_refused() {
+        assert!(Identity::from_pem(b"", b"").is_err());
     }
 }
 

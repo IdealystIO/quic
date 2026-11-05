@@ -1,0 +1,13 @@
+[package]
+name = "call-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Who may send what in a quic-call room: grants an issuer signs, revocations it signs, and the gate a relay checks them at."
+
+# Platform-free: an issuer (an API server, a CLI) mints with it, a relay
+# enforces with it, and its rules are unit-tested natively.
+[dependencies]
+call-proto = { workspace = true }
+hmac = "0.12"
+sha2 = "0.10"

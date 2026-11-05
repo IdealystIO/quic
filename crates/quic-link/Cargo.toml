@@ -24,6 +24,6 @@ rustls-pki-types = "1"
 sha2 = "0.10"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-std", "io-util"] }
 audio-codec = { workspace = true }
 jitter = { workspace = true }

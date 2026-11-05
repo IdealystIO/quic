@@ -1,0 +1,15 @@
+[package]
+name = "call-e2ee"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "End-to-end encryption for quic-call media: SFrame (RFC 9605) over call-proto datagrams, so the relay forwards what it cannot read."
+
+# Platform-free: the caller supplies the randomness (a sender's id, a fresh
+# key), so this runs and tests anywhere. Every dependency is RustCrypto.
+[dependencies]
+call-proto = { workspace = true }
+aes = "0.8"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"

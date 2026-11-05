@@ -1,0 +1,10 @@
+[package]
+name = "call-rate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bitrate control for quic-call: loss measured by receivers, a sender's budget from it, and the budget split between voice and video."
+
+# Dependency-free and platform-free: the session drives it with numbers, and
+# its decisions are unit-tested natively.
+[dependencies]
