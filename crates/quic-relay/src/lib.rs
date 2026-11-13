@@ -9,7 +9,7 @@
 //! through end-to-end encryption), reads the loss reports clients send each
 //! other, and from the difference judges what each receiver's own link loses.
 //! A receiver whose download is losing gets less — video layers held back,
-//! then cameras, then all video — and is told so; see `quic_rate::Throttle`.
+//! then cameras, then all video — and is told so; see `quic_bitrate::Throttle`.
 //! That costs the relay a header read per datagram per receiver and a little
 //! state per client, which is why it is an option.
 //!
@@ -74,7 +74,7 @@ struct Peer {
     /// Whether it has been told its grant ran out.
     told_expired: bool,
     /// What is held back from it, when throttling.
-    throttle: quic_rate::Throttle,
+    throttle: quic_bitrate::Throttle,
     /// When a keyframe request from it was last forwarded.
     last_key: u64,
     /// For [`Config::cap_bps`]: bytes it may still be sent, and when that
@@ -95,7 +95,7 @@ struct State {
     throttle: bool,
     /// What arrives from each sender, counted when throttling; and the loss
     /// that came to over the last second, by sender.
-    arrivals: quic_rate::LossMeter,
+    arrivals: quic_bitrate::LossMeter,
     uplink: HashMap<u32, f64>,
 }
 
@@ -386,7 +386,7 @@ async fn serve_peer(state: Shared, id: u32, link: Link) {
                             if other == id || p.room != room {
                                 continue;
                             }
-                            if throttle && !quic_rate::Throttle::forwards(p.throttle.level(), video) {
+                            if throttle && !quic_bitrate::Throttle::forwards(p.throttle.level(), video) {
                                 continue;
                             }
                             let simulated = loss_to.is_none_or(|t| t == other);
@@ -478,7 +478,7 @@ async fn judge(state: &Shared, id: u32, link: &Link, text: &str) -> bool {
         let now = now_ms();
         if let Some(report) = LossReport::parse(text) {
             let uplink = &st.uplink;
-            let told = quic_rate::downlink_loss(&report.0, |s| uplink.get(&s).copied().unwrap_or(0.0))
+            let told = quic_bitrate::downlink_loss(&report.0, |s| uplink.get(&s).copied().unwrap_or(0.0))
                 .and_then(|loss| peer.throttle.observe(loss, now as f64).map(|level| (level, loss)));
             (told, true)
         } else if KeyRequest::parse(text).is_some() && peer.throttle.level() > 0 {

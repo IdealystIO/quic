@@ -1,5 +1,5 @@
 [package]
-name = "quic-rate"
+name = "quic-bitrate"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

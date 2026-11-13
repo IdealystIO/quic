@@ -817,6 +817,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "quic-bitrate"
+version = "0.1.0"
+
+[[package]]
 name = "quic-e2ee"
 version = "0.1.0"
 dependencies = [
@@ -847,18 +851,14 @@ name = "quic-proto"
 version = "0.1.0"
 
 [[package]]
-name = "quic-rate"
-version = "0.1.0"
-
-[[package]]
 name = "quic-relay"
 version = "0.1.0"
 dependencies = [
  "quic-auth",
+ "quic-bitrate",
  "quic-e2ee",
  "quic-link",
  "quic-proto",
- "quic-rate",
  "tokio",
 ]
 

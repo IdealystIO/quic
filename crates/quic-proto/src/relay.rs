@@ -97,7 +97,7 @@ pub enum FromRelay {
     Said { from: u32, text: String },
     /// A relay that throttles (see `quic-relay`) is holding back this much of
     /// what it forwards to us, our download being unable to take it all — 0
-    /// for nothing held back. See `quic_rate::Throttle` for the levels.
+    /// for nothing held back. See `quic_bitrate::Throttle` for the levels.
     Throttled(u8),
     /// Anything else — shown, not acted on.
     Other(String),
@@ -305,7 +305,7 @@ impl KeyRequest {
 }
 
 /// What a receiver lost of each sender's audio in the last second, for their
-/// bitrate control (see `quic-rate`): `rx 3:12 5:0`, sender number and loss in
+/// bitrate control (see `quic-bitrate`): `rx 3:12 5:0`, sender number and loss in
 /// thousandths. One message for everyone it hears, so a room of `n` costs `n`
 /// messages a second, not `n²`.
 #[derive(Debug, Clone, PartialEq, Eq)]

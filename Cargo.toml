@@ -10,7 +10,7 @@ members = [
     "crates/quic-relay",
     "crates/quic-auth",
     "crates/quic-e2ee",
-    "crates/quic-rate",
+    "crates/quic-bitrate",
 ]
 
 [workspace.package]
@@ -27,4 +27,4 @@ quic-proto = { path = "crates/quic-proto", version = "0.1.0", registry = "idealy
 quic-relay = { path = "crates/quic-relay", version = "0.1.0", registry = "idealyst" }
 quic-auth  = { path = "crates/quic-auth", version = "0.1.0", registry = "idealyst" }
 quic-e2ee  = { path = "crates/quic-e2ee", version = "0.1.0", registry = "idealyst" }
-quic-rate  = { path = "crates/quic-rate", version = "0.1.0", registry = "idealyst" }
+quic-bitrate = { path = "crates/quic-bitrate", version = "0.1.0", registry = "idealyst" }

@@ -12,7 +12,7 @@ quic-link = { workspace = true }
 quic-proto = { workspace = true }
 quic-auth = { workspace = true }
 # Throttling: per-receiver levels, and the arrival loss it is judged by.
-quic-rate = { workspace = true }
+quic-bitrate = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [dev-dependencies]

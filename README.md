@@ -17,7 +17,7 @@ of [idea-chat](https://github.com/IdealystIO/idea-chat), with its history.
 | `quic-relay` | The relay: rooms, forwarding, grants checked at the door, throttling. A library and the `quic-relay` binary |
 | `quic-auth` | Who may send what: grants an issuer signs, revocations, the gate a relay checks |
 | `quic-e2ee` | SFrame (RFC 9605) end-to-end encryption, so the relay forwards what it cannot read |
-| `quic-rate` | Bitrate control: loss measured by receivers, a sender's budget, its split between voice and video |
+| `quic-bitrate` | Bitrate control: loss measured by receivers, a sender's budget, its split between voice and video |
 
 `docs/quic-migration.md` is why this replaced a WebSocket, and what moving
 over took.
@@ -58,5 +58,5 @@ may join any room. `crates/quic-relay/src/main.rs` lists every flag.
 
 ```bash
 cargo test --workspace
-cargo check --target wasm32-unknown-unknown -p quic-link -p quic-proto -p quic-auth -p quic-e2ee -p quic-rate
+cargo check --target wasm32-unknown-unknown -p quic-link -p quic-proto -p quic-auth -p quic-e2ee -p quic-bitrate
 ```
