@@ -1,7 +1,7 @@
 //! What quic-call puts in its datagrams, and what the relay between clients
 //! adds and says.
 //!
-//! A client sends audio and video as datagrams on one [`datagram`] link; the
+//! A client sends audio and video as datagrams on one [`quic-link`] link; the
 //! relay forwards each to everyone else in the room with the sender's id in
 //! front ([`relay::tag`]), and talks to clients over the link's control
 //! channel ([`relay::FromRelay`]). Everything a client sends starts with a
@@ -22,7 +22,7 @@
 //! assemblers, decoders — per (sender, track), so tracks never mix.
 //!
 //! A kind byte with [`SEALED`] set marks a datagram end-to-end encrypted
-//! (see `call-e2ee`): its header is as above, and the rest is ciphertext only
+//! (see `quic-e2ee`): its header is as above, and the rest is ciphertext only
 //! the room's key opens. The relay reads the kind and track through it; a
 //! client without the key sees it is not for it, rather than decoding noise.
 //!
@@ -31,7 +31,7 @@
 //! wrapping every ~49 days. Audio and video share that clock, which is what
 //! lets a receiver play them in step.
 //!
-//! [`datagram`]: https://docs.rs/datagram
+//! [`quic-link`]: https://docs.rs/datagram
 
 pub mod audio;
 pub mod relay;
@@ -47,7 +47,7 @@ pub const TRACK_MAIN: u8 = 0;
 pub const TRACK_SCREEN: u8 = 1;
 
 /// What a datagram carries, for deciding whether its sender may send it —
-/// see `call-auth`. A screen share's audio counts as the screen.
+/// see `quic-auth`. A screen share's audio counts as the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Media {
     Audio,
@@ -68,7 +68,7 @@ pub fn media(bytes: &[u8]) -> Option<Media> {
 }
 
 /// Whether a datagram is end-to-end encrypted — readable only by
-/// `call-e2ee` with the room's key; [`parse`] gives `None` for it.
+/// `quic-e2ee` with the room's key; [`parse`] gives `None` for it.
 pub fn sealed(bytes: &[u8]) -> bool {
     bytes.first().is_some_and(|k| k & SEALED != 0)
 }

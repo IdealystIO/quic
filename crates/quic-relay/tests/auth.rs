@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
-use call_auth::{Action, Grant, Revocation, Send};
-use call_proto::relay::{untag, Connect, FromRelay, LossReport};
-use call_proto::{audio, video, TRACK_MAIN};
-use call_relay::{now_ms, Auth, Config};
-use datagram::{Event, Identity, Link, Listener};
+use quic_auth::{Action, Grant, Revocation, Send};
+use quic_proto::relay::{untag, Connect, FromRelay, LossReport};
+use quic_proto::{audio, video, TRACK_MAIN};
+use quic_relay::{now_ms, Auth, Config};
+use quic_link::{Event, Identity, Link, Listener};
 
 const SECRET: &[u8] = b"a test secret of reasonable length";
 
@@ -26,7 +26,7 @@ async fn relay_with(config: Config) -> Relay {
     let listener = Listener::bind("127.0.0.1:0".parse().unwrap(), &identity).expect("bind");
     let base = format!("https://{}/", listener.local_addr().unwrap());
     let auth = Auth { secret: SECRET.to_vec(), max_ttl: Duration::from_secs(600) };
-    tokio::spawn(call_relay::serve(listener, Config { auth: Some(auth), ..config }));
+    tokio::spawn(quic_relay::serve(listener, Config { auth: Some(auth), ..config }));
     Relay { base, hash: identity.hash }
 }
 
@@ -183,7 +183,7 @@ async fn an_issuer_in_the_same_process_revokes_through_the_handle() {
     let listener = Listener::bind("127.0.0.1:0".parse().unwrap(), &identity).expect("bind");
     let base = format!("https://{}/", listener.local_addr().unwrap());
     let auth = Auth { secret: SECRET.to_vec(), max_ttl: Duration::from_secs(600) };
-    let handle = call_relay::spawn(listener, Config { auth: Some(auth), grace: Duration::from_secs(5), ..Default::default() });
+    let handle = quic_relay::spawn(listener, Config { auth: Some(auth), grace: Duration::from_secs(5), ..Default::default() });
     let r = Relay { base, hash: identity.hash };
     let alice = r.join("porch", Some(grant("porch", "alice", Send::ALL, 60_000))).await.unwrap();
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -210,7 +210,7 @@ async fn end_to_end_encrypted_media_is_forwarded_and_still_gated() {
     let r = relay(Duration::from_secs(5)).await;
     let alice = r.join("porch", Some(grant("porch", "alice", Send::parse("a").unwrap(), 60_000))).await.unwrap();
     let bob = r.join("porch", Some(grant("porch", "bob", Send::ALL, 60_000))).await.unwrap();
-    let mut seal = call_e2ee::Sealer::new(&call_e2ee::RoomKey::from_text("k").unwrap(), 0, 1);
+    let mut seal = quic_e2ee::Sealer::new(&quic_e2ee::RoomKey::from_text("k").unwrap(), 0, 1);
     assert!(gets_through(&alice, &bob, &seal.seal(&voice()).unwrap()).await, "sealed voice goes");
     assert!(!gets_through(&alice, &bob, &seal.seal(&picture()).unwrap()).await, "sealed video is still video");
 }

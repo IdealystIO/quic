@@ -1,6 +1,6 @@
 //! A relay with nothing on top: every datagram and control message one client
 //! sends is forwarded to every other client. No rooms, no tickets, no codec —
-//! just enough to watch `datagram` carry traffic between two processes.
+//! just enough to watch `quic-link` carry traffic between two processes.
 //!
 //! ```text
 //! cargo run -p datagram --example relay            # 127.0.0.1:4433, self-signed
@@ -17,7 +17,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use datagram::{Event, Identity, Link, Listener};
+use quic_link::{Event, Identity, Link, Listener};
 
 type Peers = Arc<Mutex<Vec<(u32, Link)>>>;
 

@@ -18,7 +18,7 @@
 //!
 //! # Authorisation
 //!
-//! A relay that checks who may send (see `call-auth`) takes a grant in the
+//! A relay that checks who may send (see `quic-auth`) takes a grant in the
 //! connect URL ([`Connect`]: `?room=R&grant=…`) and refuses the connection —
 //! 401 with none, 403 with a bad one — before any session exists. Once in:
 //!
@@ -79,7 +79,7 @@ pub enum FromRelay {
     Named { id: u32, user: String },
     /// Our grant runs out in this many seconds; renew before then.
     Expires { secs: u64 },
-    /// What we may send now, as `call-auth` writes it (`av`, `-` for nothing).
+    /// What we may send now, as `quic-auth` writes it (`av`, `-` for nothing).
     MaySend(String),
     /// Our grant was revoked; the session is ending.
     Revoked,
@@ -95,9 +95,9 @@ pub enum FromRelay {
     Left(u32),
     /// Another client's control message, passed on.
     Said { from: u32, text: String },
-    /// A relay that throttles (see `call-relay`) is holding back this much of
+    /// A relay that throttles (see `quic-relay`) is holding back this much of
     /// what it forwards to us, our download being unable to take it all — 0
-    /// for nothing held back. See `call_rate::Throttle` for the levels.
+    /// for nothing held back. See `quic_rate::Throttle` for the levels.
     Throttled(u8),
     /// Anything else — shown, not acted on.
     Other(String),
@@ -175,7 +175,7 @@ impl FromRelay {
 /// A control message from a client to the relay.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ToRelay {
-    /// A fresh grant for this connection; see `call-auth`.
+    /// A fresh grant for this connection; see `quic-auth`.
     Renew(String),
     /// Answer with `pong <n>`, to measure the round trip.
     Ping(u64),
@@ -305,7 +305,7 @@ impl KeyRequest {
 }
 
 /// What a receiver lost of each sender's audio in the last second, for their
-/// bitrate control (see `call-rate`): `rx 3:12 5:0`, sender number and loss in
+/// bitrate control (see `quic-rate`): `rx 3:12 5:0`, sender number and loss in
 /// thousandths. One message for everyone it hears, so a room of `n` costs `n`
 /// messages a second, not `n²`.
 #[derive(Debug, Clone, PartialEq, Eq)]

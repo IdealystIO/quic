@@ -1,0 +1,30 @@
+# Real-time media over QUIC: the link, the wire format, the relay, and what
+# a relay checks and a sender spends. No framework dependency: everything
+# here runs natively and in a browser (WebTransport), and tests natively.
+# The media built on it (video, audio, sessions) is IdealystIO/quic-media.
+[workspace]
+resolver = "2"
+members = [
+    "crates/quic-link",
+    "crates/quic-proto",
+    "crates/quic-relay",
+    "crates/quic-auth",
+    "crates/quic-e2ee",
+    "crates/quic-rate",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/IdealystIO/quic"
+# Published to the idealyst registry only (.cargo/config.toml).
+publish = ["idealyst"]
+
+[workspace.dependencies]
+quic-link  = { path = "crates/quic-link", version = "0.1.0", registry = "idealyst" }
+quic-proto = { path = "crates/quic-proto", version = "0.1.0", registry = "idealyst" }
+quic-relay = { path = "crates/quic-relay", version = "0.1.0", registry = "idealyst" }
+quic-auth  = { path = "crates/quic-auth", version = "0.1.0", registry = "idealyst" }
+quic-e2ee  = { path = "crates/quic-e2ee", version = "0.1.0", registry = "idealyst" }
+quic-rate  = { path = "crates/quic-rate", version = "0.1.0", registry = "idealyst" }

@@ -1,18 +1,20 @@
 [package]
-name = "call-relay"
+name = "quic-relay"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The quic-call relay: rooms of clients, every datagram forwarded to the rest of the room, and who may send checked against call-auth grants."
+repository.workspace = true
+publish.workspace = true
+description = "The relay: rooms of clients, every datagram forwarded to the rest of the room, and who may send checked against quic-auth grants."
 
 [dependencies]
-datagram = { workspace = true }
-call-proto = { workspace = true }
-call-auth = { workspace = true }
+quic-link = { workspace = true }
+quic-proto = { workspace = true }
+quic-auth = { workspace = true }
 # Throttling: per-receiver levels, and the arrival loss it is judged by.
-call-rate = { workspace = true }
+quic-rate = { workspace = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time"] }
 
 [dev-dependencies]
 # Sealed datagrams, to show the relay forwards what it cannot read.
-call-e2ee = { workspace = true }
+quic-e2ee = { workspace = true }

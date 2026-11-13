@@ -1,9 +1,11 @@
 [package]
-name = "call-proto"
+name = "quic-proto"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Wire format for quic-call: audio and video datagrams, and what the relay adds and says."
+repository.workspace = true
+publish.workspace = true
+description = "Wire format for real-time media over QUIC: audio and video datagrams, and what the relay adds and says."
 
 # Dependency-free and platform-free: the client (wasm) and the relay (native)
 # both speak it, and its tests run anywhere.

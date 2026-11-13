@@ -1,0 +1,12 @@
+# Where these crates are published, and where any idealyst crate resolves
+# from. Named on every dependency that lives there.
+[registries.idealyst]
+index = "sparse+https://crates.idealyst.io/index/"
+
+# WebTransport, for the wasm build only. `web-sys` gates its WebTransport
+# bindings behind `--cfg=web_sys_unstable_apis`, and a dependency cannot turn
+# that on for its user: `web-transport-wasm` fails with a `compile_error!`
+# saying so. Every app that builds quic-link for the browser needs this too
+# (README.md). Scoped to wasm so host builds keep their fingerprints.
+[target.wasm32-unknown-unknown]
+rustflags = ["--cfg=web_sys_unstable_apis"]

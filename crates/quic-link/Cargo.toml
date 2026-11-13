@@ -1,8 +1,10 @@
 [package]
-name = "datagram"
+name = "quic-link"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+repository.workspace = true
+publish.workspace = true
 description = "A real-time link over QUIC: unreliable datagrams for media, reliable streams for control."
 
 [dependencies]
@@ -25,5 +27,3 @@ sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "io-std", "io-util"] }
-audio-codec = { workspace = true }
-jitter = { workspace = true }

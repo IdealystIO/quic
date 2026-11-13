@@ -1,6 +1,6 @@
 //! How fast to send: each receiver measures what it loses of everyone's
 //! audio ([`LossMeter`]) and says so once a second
-//! (`call_proto::relay::LossReport`); each sender turns what it hears about
+//! (`quic_proto::relay::LossReport`); each sender turns what it hears about
 //! itself, its own send queue and its round trip into a budget
 //! ([`Controller`]), and splits the budget between voice and video
 //! ([`Plan`]).
@@ -498,7 +498,7 @@ impl Throttle {
     }
 }
 
-/// The camera's track number, `call_proto::TRACK_MAIN` — restated so this
+/// The camera's track number, `quic_proto::TRACK_MAIN` — restated so this
 /// crate stays dependency-free.
 const CAMERA: u8 = 0;
 

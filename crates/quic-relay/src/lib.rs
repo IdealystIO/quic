@@ -1,6 +1,6 @@
 //! The quic-call relay. Clients connect into a room; every datagram and
 //! control message one sends is forwarded to the rest of that room, tagged
-//! with the sender's number, in `call_proto::relay`'s terms. It reads nothing
+//! with the sender's number, in `quic_proto::relay`'s terms. It reads nothing
 //! of a datagram past its first two bytes — no codec, no media — unless it is
 //! throttling.
 //!
@@ -9,11 +9,11 @@
 //! through end-to-end encryption), reads the loss reports clients send each
 //! other, and from the difference judges what each receiver's own link loses.
 //! A receiver whose download is losing gets less — video layers held back,
-//! then cameras, then all video — and is told so; see `call_rate::Throttle`.
+//! then cameras, then all video — and is told so; see `quic_rate::Throttle`.
 //! That costs the relay a header read per datagram per receiver and a little
 //! state per client, which is why it is an option.
 //!
-//! With [`Auth`], it is also where `call-auth` is enforced: a grant to get in,
+//! With [`Auth`], it is also where `quic-auth` is enforced: a grant to get in,
 //! checked once per connection; then, per datagram, whether the sender's
 //! grant still allows that kind of media; renewals; revocations applied to
 //! whoever is connected the moment they arrive. Without, anyone may connect to
@@ -23,9 +23,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use call_auth::{Gate, Grant, Outcome};
-use call_proto::relay::{tag, Connect, FromRelay, KeyRequest, LossReport, ToRelay};
-use datagram::{Event, Link, Listener, Request};
+use quic_auth::{Gate, Grant, Outcome};
+use quic_proto::relay::{tag, Connect, FromRelay, KeyRequest, LossReport, ToRelay};
+use quic_link::{Event, Link, Listener, Request};
 
 /// Checking grants: the issuer's secret, and the longest grant to accept —
 /// which is also how long a revocation is remembered.
@@ -74,7 +74,7 @@ struct Peer {
     /// Whether it has been told its grant ran out.
     told_expired: bool,
     /// What is held back from it, when throttling.
-    throttle: call_rate::Throttle,
+    throttle: quic_rate::Throttle,
     /// When a keyframe request from it was last forwarded.
     last_key: u64,
     /// For [`Config::cap_bps`]: bytes it may still be sent, and when that
@@ -95,7 +95,7 @@ struct State {
     throttle: bool,
     /// What arrives from each sender, counted when throttling; and the loss
     /// that came to over the last second, by sender.
-    arrivals: call_rate::LossMeter,
+    arrivals: quic_rate::LossMeter,
     uplink: HashMap<u32, f64>,
 }
 
@@ -152,7 +152,7 @@ impl Handle {
     /// would be: kicked clients are told and closed, limited ones told and
     /// filtered, and the voided grants refused from now on. Returns how many
     /// connected clients it touched.
-    pub async fn revoke(&self, token: &str) -> Result<usize, call_auth::Refusal> {
+    pub async fn revoke(&self, token: &str) -> Result<usize, quic_auth::Refusal> {
         let (hit, gone) = apply(&self.0, token)?;
         let touched = hit.len();
         notify(hit, gone).await;
@@ -169,10 +169,10 @@ type Hit = (Vec<(u32, Link, Outcome)>, Vec<(u32, Vec<Link>)>);
 
 /// Check a revocation and apply it to the relay's state. Who to tell comes
 /// back, for sending outside the lock.
-fn apply(state: &Shared, token: &str) -> Result<Hit, call_auth::Refusal> {
+fn apply(state: &Shared, token: &str) -> Result<Hit, quic_auth::Refusal> {
     let mut st = state.lock().unwrap();
     let st = &mut *st;
-    let gate = st.gate.as_mut().ok_or(call_auth::Refusal::Malformed)?;
+    let gate = st.gate.as_mut().ok_or(quic_auth::Refusal::Malformed)?;
     let r = gate.revoke(token, now_ms())?;
     let mut hit = Vec::new();
     for (&id, peer) in st.peers.iter_mut() {
@@ -366,19 +366,19 @@ async fn serve_peer(state: Shared, id: u32, link: Link) {
                     let Some(peer) = st.peers.get(&id) else { break };
                     let allowed = match &peer.grant {
                         None => true,
-                        Some(g) => call_proto::media(&bytes).is_some_and(|m| g.may_send(m, now_ms())),
+                        Some(g) => quic_proto::media(&bytes).is_some_and(|m| g.may_send(m, now_ms())),
                     };
                     if !allowed {
                         None
                     } else {
                         if st.throttle {
-                            if let Some((call_proto::TRACK_MAIN, seq)) = call_proto::audio::seq_of(&bytes) {
+                            if let Some((quic_proto::TRACK_MAIN, seq)) = quic_proto::audio::seq_of(&bytes) {
                                 st.arrivals.observe(id, seq);
-                            } else if let Some((track, frame, count)) = call_proto::video::pieces_of(&bytes) {
+                            } else if let Some((track, frame, count)) = quic_proto::video::pieces_of(&bytes) {
                                 st.arrivals.observe_video(id, track, frame, count);
                             }
                         }
-                        let video = call_proto::video::layer_of(&bytes);
+                        let video = quic_proto::video::layer_of(&bytes);
                         let room = st.peers[&id].room.clone();
                         let (throttle, loss, loss_to, cap) = (st.throttle, st.loss, st.loss_to, st.cap_bps);
                         let mut targets = Vec::new();
@@ -386,7 +386,7 @@ async fn serve_peer(state: Shared, id: u32, link: Link) {
                             if other == id || p.room != room {
                                 continue;
                             }
-                            if throttle && !call_rate::Throttle::forwards(p.throttle.level(), video) {
+                            if throttle && !quic_rate::Throttle::forwards(p.throttle.level(), video) {
                                 continue;
                             }
                             let simulated = loss_to.is_none_or(|t| t == other);
@@ -478,7 +478,7 @@ async fn judge(state: &Shared, id: u32, link: &Link, text: &str) -> bool {
         let now = now_ms();
         if let Some(report) = LossReport::parse(text) {
             let uplink = &st.uplink;
-            let told = call_rate::downlink_loss(&report.0, |s| uplink.get(&s).copied().unwrap_or(0.0))
+            let told = quic_rate::downlink_loss(&report.0, |s| uplink.get(&s).copied().unwrap_or(0.0))
                 .and_then(|loss| peer.throttle.observe(loss, now as f64).map(|level| (level, loss)));
             (told, true)
         } else if KeyRequest::parse(text).is_some() && peer.throttle.level() > 0 {

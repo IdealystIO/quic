@@ -46,7 +46,7 @@ first (see [noise-suppression.md](noise-suppression.md#chain-latency)):
 | --- | --- | --- |
 | `jitter` | adaptive jitter buffer, PLC, and the playout clock, dependency-free | 21 |
 | `audio-codec` | Opus encode/decode, pure Rust | 8 |
-| `datagram` | QUIC link: datagrams for media, streams for control | 4 |
+| `quic-link` | QUIC link: datagrams for media, streams for control | 4 |
 
 All three build for `wasm32-unknown-unknown` and for the host.
 
@@ -197,7 +197,7 @@ the receiving half that a fix would make usable. The choice is one file.
   seconds: a QUIC handshake nothing answers does not fail fast, and the browser
   retries until its own timeout. Now the client gives up twice — *before*
   dialling when the published address is one this page could not reach even in
-  principle (`datagram::unreachable_from`, which is the tunnelled case), and
+  principle (`quic_link::unreachable_from`, which is the tunnelled case), and
   after three seconds otherwise. Dropping the dial does not cancel the handshake
   underneath, so an orphaned session may still open and be discarded; that is
   worth seven seconds off every join that was never going to work.
@@ -217,7 +217,7 @@ the receiving half that a fix would make usable. The choice is one file.
 - **A pinned certificate valid for too long fails the same way.** `rcgen`
   defaults to the year 4096; browsers refuse anything over about fourteen days,
   and say so as "Opening handshake failed" — naming neither certificates nor
-  validity. `datagram::host::VALID_DAYS` is thirteen, with a test.
+  validity. `quic_link::host::VALID_DAYS` is thirteen, with a test.
 
 ## A trap that cost an hour
 

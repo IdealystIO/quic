@@ -5,16 +5,16 @@
 //! datagrams with [SFrame](sframe) under a key of its own, derived from the
 //! room key and a [`Kid`] it picks at random when it joins; receivers derive
 //! the same key from the KID in each datagram's header. The relay holds no
-//! key: it reads the clear call-proto header it needs (kind and track, for
-//! `call-auth`) and forwards the rest.
+//! key: it reads the clear quic-proto header it needs (kind and track, for
+//! `quic-auth`) and forwards the rest.
 //!
 //! ```text
-//! sealed: [call-proto header, SEALED set][SFrame header][ciphertext][tag: 10]
+//! sealed: [quic-proto header, SEALED set][SFrame header][ciphertext][tag: 10]
 //! ```
 //!
-//! The call-proto header stays in the clear and is authenticated as SFrame
+//! The quic-proto header stays in the clear and is authenticated as SFrame
 //! metadata, so the relay can route on it but not change it. Its kind byte
-//! carries [`call_proto::SEALED`], so a client without a key knows to leave
+//! carries [`quic_proto::SEALED`], so a client without a key knows to leave
 //! it alone, and one with a key can tell someone not encrypting
 //! ([`Refusal::NotSealed`]) from someone with another key. Audio is sealed
 //! per packet; video per fragment, so each datagram stands alone and a lost
@@ -49,7 +49,7 @@ pub mod sframe;
 
 use std::collections::HashMap;
 
-use call_proto::{audio, video, KIND_AUDIO, KIND_VIDEO, SEALED};
+use quic_proto::{audio, video, KIND_AUDIO, KIND_VIDEO, SEALED};
 use sframe::{Header, Keys};
 
 /// The most sealing adds to a datagram: a config byte, a 5-byte KID, an
@@ -140,10 +140,10 @@ impl Sealer {
         Sealer { kid, keys: Keys::derive(kid, &key.0), ctr: 0 }
     }
 
-    /// A call-proto datagram, sealed. `None` for one that is not audio or
+    /// A quic-proto datagram, sealed. `None` for one that is not audio or
     /// video.
     pub fn seal(&mut self, datagram: &[u8]) -> Option<Vec<u8>> {
-        if call_proto::sealed(datagram) {
+        if quic_proto::sealed(datagram) {
             return None;
         }
         let at = clear_header(datagram)?;
@@ -239,10 +239,10 @@ impl Opener {
     }
 
     /// A datagram the relay forwarded from relay number `from`, opened back
-    /// into the call-proto datagram its sender sealed.
+    /// into the quic-proto datagram its sender sealed.
     pub fn open(&mut self, from: u32, datagram: &[u8]) -> Result<Vec<u8>, Refusal> {
-        if !call_proto::sealed(datagram) {
-            return Err(if call_proto::parse(datagram).is_some() { Refusal::NotSealed } else { Refusal::Malformed });
+        if !quic_proto::sealed(datagram) {
+            return Err(if quic_proto::parse(datagram).is_some() { Refusal::NotSealed } else { Refusal::Malformed });
         }
         let at = clear_header(datagram).ok_or(Refusal::Malformed)?;
         let (clear, sealed) = datagram.split_at(at);
@@ -287,7 +287,7 @@ impl Opener {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use call_proto::{Datagram, TRACK_MAIN, TRACK_SCREEN};
+    use quic_proto::{Datagram, TRACK_MAIN, TRACK_SCREEN};
 
     fn key(text: &str) -> RoomKey {
         RoomKey::from_text(text).unwrap()
@@ -311,7 +311,7 @@ mod tests {
             let sealed = alice.seal(&piece).unwrap();
             assert!(sealed.len() <= 1200);
             let opened = bob.open(3, &sealed).unwrap();
-            assert!(matches!(call_proto::parse(&opened), Some(Datagram::Video(f)) if f.track == TRACK_SCREEN));
+            assert!(matches!(quic_proto::parse(&opened), Some(Datagram::Video(f)) if f.track == TRACK_SCREEN));
             assert_eq!(opened, piece);
         }
     }
@@ -320,9 +320,9 @@ mod tests {
     fn the_relay_still_reads_what_it_needs() {
         let mut s = Sealer::new(&key("k"), 0, 1);
         let screen_audio = s.seal(&audio::encode(TRACK_SCREEN, 0, 48_000, 0, &[1; 60])).unwrap();
-        assert_eq!(call_proto::media(&screen_audio), Some(call_proto::Media::Screen));
+        assert_eq!(quic_proto::media(&screen_audio), Some(quic_proto::Media::Screen));
         let camera = s.seal(&video::fragment(TRACK_MAIN, 0, 0, true, &[1; 10], 1000).unwrap()[0]).unwrap();
-        assert_eq!(call_proto::media(&camera), Some(call_proto::Media::Video));
+        assert_eq!(quic_proto::media(&camera), Some(quic_proto::Media::Video));
     }
 
     #[test]
@@ -332,7 +332,7 @@ mod tests {
         let sealed = s.seal(&plain).unwrap();
         assert_eq!(sealed[0], plain[0] | SEALED, "marked sealed");
         assert_eq!(sealed[1..audio::HEADER], plain[1..audio::HEADER], "the header is clear");
-        assert_eq!(call_proto::parse(&sealed), None, "and not mistaken for plain media");
+        assert_eq!(quic_proto::parse(&sealed), None, "and not mistaken for plain media");
         assert!(!sealed.windows(6).any(|w| w == b"secret"), "the payload is not");
     }
 

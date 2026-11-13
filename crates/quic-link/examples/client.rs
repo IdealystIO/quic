@@ -13,7 +13,7 @@
 
 use std::time::Duration;
 
-use datagram::{Event, Link};
+use quic_link::{Event, Link};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
 #[tokio::main]
@@ -23,7 +23,7 @@ async fn main() {
         eprintln!("usage: client <URL> [CERT_HASH_HEX]   (the relay prints both)");
         std::process::exit(2);
     };
-    let hash = args.next().map(|h| datagram::parse_hash(&h).expect("certificate hash is not hex"));
+    let hash = args.next().map(|h| quic_link::parse_hash(&h).expect("certificate hash is not hex"));
 
     // A handshake nothing answers does not fail on its own for a long time, so
     // give up quickly and say so rather than sitting there looking connected.

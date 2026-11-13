@@ -55,7 +55,7 @@
 //! is. The HMAC is SHA-256 over the fields NUL-separated behind a label per
 //! kind, so neither kind of token can be passed off as the other.
 
-use call_proto::Media;
+use quic_proto::Media;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -186,7 +186,7 @@ impl Grant {
     pub fn mint(secret: &[u8], room: &str, user: &str, send: Send, now_ms: u64, ttl_ms: u64) -> String {
         assert!(valid_id(room) && valid_id(user), "room and user ids are [A-Za-z0-9_~-]");
         let (send, issued, expires) = (send.to_code(), now_ms.to_string(), (now_ms + ttl_ms).to_string());
-        let sig = sign(secret, "call-auth grant v1", &[room, user, &send, &issued, &expires]);
+        let sig = sign(secret, "quic-auth grant v1", &[room, user, &send, &issued, &expires]);
         format!("g1.{room}.{user}.{send}.{issued}.{expires}.{sig}")
     }
 
@@ -201,7 +201,7 @@ impl Grant {
         let parsed = (Send::parse(send), issued.parse::<u64>().ok(), expires.parse::<u64>().ok());
         let (Some(send_v), Some(issued_ms), Some(expires_ms)) = parsed else { return Err(Refusal::Malformed) };
         // Signature before anything else is judged, so a forger learns nothing.
-        if !same(&sign(secret, "call-auth grant v1", &[room, user, send, issued, expires]), sig) {
+        if !same(&sign(secret, "quic-auth grant v1", &[room, user, send, issued, expires]), sig) {
             return Err(Refusal::BadSignature);
         }
         Ok(Grant { room: room.into(), user: user.into(), send: send_v, issued_ms, expires_ms })
@@ -242,7 +242,7 @@ impl Revocation {
             Action::Limit(s) => format!("send:{}", s.to_code()),
         };
         let at = now_ms.to_string();
-        let sig = sign(secret, "call-auth revocation v1", &[room, user, &action, &at]);
+        let sig = sign(secret, "quic-auth revocation v1", &[room, user, &action, &at]);
         format!("r1.{room}.{user}.{action}.{at}.{sig}")
     }
 
@@ -259,7 +259,7 @@ impl Revocation {
         let (Some(parsed_action), Some(at_ms)) = (parsed_action, at.parse::<u64>().ok()) else {
             return Err(Refusal::Malformed);
         };
-        if !same(&sign(secret, "call-auth revocation v1", &[room, user, action, at]), sig) {
+        if !same(&sign(secret, "quic-auth revocation v1", &[room, user, action, at]), sig) {
             return Err(Refusal::BadSignature);
         }
         Ok(Revocation { room: (room != "*").then(|| room.to_string()), user: user.into(), action: parsed_action, at_ms })

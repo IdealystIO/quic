@@ -16,7 +16,7 @@
 //! frame rate, layer 1 adds the frames that make it half, layer 2 the rest.
 //! A frame refers only to frames of its own layer or below, so a relay can
 //! drop whole layers for someone whose download cannot take them — see
-//! `call-relay`'s throttling — and what is left still decodes. `flags` carries
+//! `quic-relay`'s throttling — and what is left still decodes. `flags` carries
 //! the layer (bits 1–2) beside the keyframe bit; `back` says how many frames
 //! earlier the frame this one needs is: the latest before it of its own layer
 //! or below, 0 for a keyframe. A sender without layers sends everything as

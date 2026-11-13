@@ -1,18 +1,18 @@
-//! `call-relay`: serve rooms, and act as a minimal issuer for them.
+//! `quic-relay`: serve rooms, and act as a minimal issuer for them.
 //!
 //! ```text
-//! call-relay [ADDR:PORT] [--cert FULLCHAIN.pem --key PRIVKEY.pem] [--host NAME]
+//! quic-relay [ADDR:PORT] [--cert FULLCHAIN.pem --key PRIVKEY.pem] [--host NAME]
 //!            [--secret-file FILE] [--max-ttl SECS] [--grace SECS] [--throttle on|off]
 //!            [--loss PERCENT] [--cap KBPS] [--loss-to N]
-//! call-relay mint   --secret-file FILE --room ROOM --user USER [--send avs] [--ttl SECS]
-//! call-relay revoke --secret-file FILE --relay URL [--hash HEX] --user USER
+//! quic-relay mint   --secret-file FILE --room ROOM --user USER [--send avs] [--ttl SECS]
+//! quic-relay revoke --secret-file FILE --relay URL [--hash HEX] --user USER
 //!                   [--room ROOM] [--send CODE]
 //! ```
 //!
 //! **Serving.** With `--cert`/`--key` it serves a CA-issued certificate and
 //! clients dial `https://<host>:<port>/` with no hash; without, it makes a
 //! self-signed one and prints the hash clients must pin — a new one on every
-//! start. With `--secret-file` it checks `call-auth` grants: nobody gets in
+//! start. With `--secret-file` it checks `quic-auth` grants: nobody gets in
 //! without one, and nobody sends what theirs does not allow. Without, anyone
 //! may join any room. `--throttle on` holds back video from clients whose
 //! download cannot take it all — more work for the relay, a steadier call
@@ -24,21 +24,21 @@
 //! **Issuing.** `mint` prints a grant; `revoke` signs a revocation and hands
 //! it to a running relay — a kick, or with `--send` a limit (`--send -` for
 //! listen-only); without `--room`, for every room. Any issuer holding the
-//! secret can do the same through `call-auth` — Hearth's API server, for one.
+//! secret can do the same through `quic-auth` — Hearth's API server, for one.
 
 use std::time::Duration;
 
-use call_auth::{Action, Grant, Revocation, Send};
-use call_proto::relay::{Connect, FromRelay};
-use call_relay::{now_ms, Auth, Config};
-use datagram::{Event, Identity, Link, Listener};
+use quic_auth::{Action, Grant, Revocation, Send};
+use quic_proto::relay::{Connect, FromRelay};
+use quic_relay::{now_ms, Auth, Config};
+use quic_link::{Event, Identity, Link, Listener};
 
 const USAGE: &str = "usage:
-  call-relay [ADDR:PORT] [--cert FULLCHAIN.pem --key PRIVKEY.pem] [--host NAME]
+  quic-relay [ADDR:PORT] [--cert FULLCHAIN.pem --key PRIVKEY.pem] [--host NAME]
              [--secret-file FILE] [--max-ttl SECS] [--grace SECS] [--throttle on|off]
              [--loss PERCENT] [--cap KBPS] [--loss-to N]
-  call-relay mint   --secret-file FILE --room ROOM --user USER [--send avs] [--ttl SECS]
-  call-relay revoke --secret-file FILE --relay URL [--hash HEX] --user USER [--room ROOM] [--send CODE]";
+  quic-relay mint   --secret-file FILE --room ROOM --user USER [--send avs] [--ttl SECS]
+  quic-relay revoke --secret-file FILE --relay URL [--hash HEX] --user USER [--room ROOM] [--send CODE]";
 
 /// Flags as name → value, and the positional arguments.
 fn flags(args: impl Iterator<Item = String>) -> (std::collections::HashMap<String, String>, Vec<String>) {
@@ -81,7 +81,7 @@ fn need<'a>(flags: &'a std::collections::HashMap<String, String>, name: &str) ->
 
 fn id(flags: &std::collections::HashMap<String, String>, name: &str) -> String {
     let v = need(flags, name);
-    if !call_auth::valid_id(v) {
+    if !quic_auth::valid_id(v) {
         fail(&format!("--{name} {v:?}: ids are letters, digits, _ ~ -"));
     }
     v.to_string()
@@ -112,7 +112,7 @@ async fn main() {
             let room = f.contains_key("room").then(|| id(&f, "room"));
             let action = send(&f).map(Action::Limit).unwrap_or(Action::Kick);
             let token = Revocation::mint(&secret, room.as_deref(), &id(&f, "user"), action, now_ms());
-            let hash = f.get("hash").map(|h| datagram::parse_hash(h).unwrap_or_else(|| fail("--hash: 64 hex characters")));
+            let hash = f.get("hash").map(|h| quic_link::parse_hash(h).unwrap_or_else(|| fail("--hash: 64 hex characters")));
             let url = Connect { revoke: Some(token), ..Default::default() }.url(need(&f, "relay"));
             let link = Link::connect(&url, hash).await.unwrap_or_else(|e| {
                 eprintln!("the relay did not take it: {e}");
@@ -170,7 +170,7 @@ async fn serve(args: impl Iterator<Item = String>) {
     let hash = if pinned { format!("&hash={}", identity.hash_hex()) } else { String::new() };
     println!("[relay] listening on {bound}");
     if authed {
-        println!("[relay] checking grants; mint one with `call-relay mint --secret-file … --room R --user U`");
+        println!("[relay] checking grants; mint one with `quic-relay mint --secret-file … --room R --user U`");
         println!("[relay] open the quic-call page at:");
         println!("    http://localhost:8080/?url=https://{dial}/{hash}&room=R&grant=<grant>");
     } else {
@@ -201,7 +201,7 @@ async fn serve(args: impl Iterator<Item = String>) {
     if throttle == Some(true) {
         println!("[relay] throttling: holding back video from clients whose download cannot take it");
     }
-    call_relay::serve(
+    quic_relay::serve(
         listener,
         Config {
             auth,
